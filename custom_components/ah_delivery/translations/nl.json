@@ -1,0 +1,51 @@
+{
+  "title": "Albert Heijn-bezorging",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Albert Heijn koppelen",
+        "description": "Open deze Albert Heijn-login-URL in je browser: {login_url}\n\nLog in bij Albert Heijn. Wanneer de browser doorstuurt naar appie://login-exit, kopieer je de authorization code of de volledige redirect-URL en plak je die hieronder. Je AH-wachtwoord wordt nooit in Home Assistant opgeslagen.",
+        "data": {
+          "authorization_code": "Authorization code of redirect-URL"
+        },
+        "data_description": {
+          "authorization_code": "Plak de waarde van de code-parameter of de volledige appie://login-exit?... URL."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Albert Heijn opnieuw koppelen",
+        "description": "De Albert Heijn-authenticatie is verlopen. Open {login_url}, log opnieuw in en plak daarna de nieuwe authorization code of volledige redirect-URL.",
+        "data": {
+          "authorization_code": "Authorization code of redirect-URL"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Albert Heijn accepteert deze authorization code niet. Vraag een nieuwe code op en probeer opnieuw.",
+      "cannot_connect": "Kan geen verbinding maken met de Albert Heijn-API. Controleer de verbinding en probeer opnieuw.",
+      "wrong_account": "Je bent met een ander Albert Heijn-account ingelogd. Log in met het account dat oorspronkelijk gekoppeld was."
+    },
+    "abort": {
+      "already_configured": "Dit Albert Heijn-account is al gekoppeld."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "next_delivery": {
+        "name": "Volgende bezorging"
+      },
+      "slot_start": {
+        "name": "Start bezorgvenster"
+      },
+      "slot_end": {
+        "name": "Einde bezorgvenster"
+      },
+      "live_eta": {
+        "name": "Live verwachte aankomst"
+      },
+      "delivery_status": {
+        "name": "Bezorgstatus"
+      }
+    }
+  }
+}

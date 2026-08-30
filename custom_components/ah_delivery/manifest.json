@@ -1,0 +1,12 @@
+{
+  "domain": "ah_delivery",
+  "name": "Albert Heijn Delivery",
+  "codeowners": ["@digital-IMEI"],
+  "config_flow": true,
+  "documentation": "https://github.com/digital-IMEI/home-assistant-ah-delivery",
+  "issue_tracker": "https://github.com/digital-IMEI/home-assistant-ah-delivery/issues",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "requirements": [],
+  "version": "0.1.3"
+}
