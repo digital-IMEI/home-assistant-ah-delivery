@@ -28,6 +28,10 @@ Diagnostic sensors may be disabled by default. ETA support depends on the fields
 
 ## Release notes
 
+### 0.1.4
+
+- Adds explicit logo assets in addition to the integration icons for HACS and Home Assistant.
+
 ### 0.1.3
 
 - Moved the integration to its dedicated GitHub repository.
