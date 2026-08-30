@@ -15,6 +15,14 @@ class AhTransientError(AhDeliveryError):
     """Temporary communication or server error."""
 
 
+class AhRequestError(AhDeliveryError):
+    """Albert Heijn rejected a non-authentication API request."""
+
+    def __init__(self, message: str, status: int) -> None:
+        super().__init__(message)
+        self.status = status
+
+
 class AhRateLimitError(AhTransientError):
     """API rate limit was hit."""
 
