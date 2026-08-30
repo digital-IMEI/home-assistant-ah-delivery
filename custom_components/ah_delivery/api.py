@@ -23,7 +23,13 @@ from .const import (
     TOKEN_REFRESH_MARGIN,
     USER_AGENT,
 )
-from .exceptions import AhAuthError, AhGraphQLError, AhRateLimitError, AhTransientError
+from .exceptions import (
+    AhAuthError,
+    AhGraphQLError,
+    AhRateLimitError,
+    AhRequestError,
+    AhTransientError,
+)
 from .models import Delivery, parse_fulfillments
 
 _LOGGER = logging.getLogger(__name__)
@@ -98,13 +104,23 @@ class AhApiClient:
         return headers
 
     async def exchange_authorization_code(self, user_value: str) -> dict[str, Any]:
+        """Exchange an AH authorization code for tokens.
+
+        A 4xx on this endpoint really is an authentication failure. Generic API
+        4xx responses elsewhere must never be reclassified as invalid login.
+        """
         code = self.extract_authorization_code(user_value)
-        payload = await self._raw_request(
-            "POST",
-            "/mobile-auth/v1/auth/token",
-            json_body={"clientId": CLIENT_ID, "code": code},
-            authenticated=False,
-        )
+        try:
+            payload = await self._raw_request(
+                "POST",
+                "/mobile-auth/v1/auth/token",
+                json_body={"clientId": CLIENT_ID, "code": code},
+                authenticated=False,
+            )
+        except AhRequestError as err:
+            raise AhAuthError(
+                f"Albert Heijn rejected the authorization code: {err}"
+            ) from err
         await self._accept_token_payload(payload)
         return self.token_data()
 
@@ -112,16 +128,20 @@ class AhApiClient:
         if not self._refresh_token:
             raise AhAuthError("No refresh token is available")
         async with self._refresh_lock:
-            # Another task may have refreshed while we waited.
             if self._token_is_fresh():
                 return
-            payload = await self._raw_request(
-                "POST",
-                "/mobile-auth/v1/auth/token/refresh",
-                json_body={"clientId": CLIENT_ID, "refreshToken": self._refresh_token},
-                authenticated=False,
-                allow_refresh=False,
-            )
+            try:
+                payload = await self._raw_request(
+                    "POST",
+                    "/mobile-auth/v1/auth/token/refresh",
+                    json_body={"clientId": CLIENT_ID, "refreshToken": self._refresh_token},
+                    authenticated=False,
+                    allow_refresh=False,
+                )
+            except AhRequestError as err:
+                raise AhAuthError(
+                    f"Albert Heijn rejected the refresh token: {err}"
+                ) from err
             await self._accept_token_payload(payload)
 
     def _token_is_fresh(self) -> bool:
@@ -192,7 +212,6 @@ class AhApiClient:
 
         if response.status == 401 and authenticated and allow_refresh and self._refresh_token:
             response.release()
-            # Force refresh even if the stored expiry was optimistic.
             self._expires_at = 1
             await self.async_refresh_access_token()
             return await self._raw_request(
@@ -222,8 +241,21 @@ class AhApiClient:
         if response.status >= 500:
             raise AhTransientError(f"Albert Heijn server error (HTTP {response.status})")
         if response.status >= 400:
-            # Token exchange failures are authentication failures, not transient errors.
-            raise AhAuthError(f"Albert Heijn request was rejected (HTTP {response.status})")
+            safe_message = f"Albert Heijn request was rejected (HTTP {response.status})"
+            if text:
+                try:
+                    error_payload = json.loads(text)
+                except json.JSONDecodeError:
+                    error_payload = None
+                if isinstance(error_payload, dict):
+                    api_code = error_payload.get("code")
+                    api_message = error_payload.get("message")
+                    details = ": ".join(
+                        str(value) for value in (api_code, api_message) if value
+                    )
+                    if details:
+                        safe_message = f"{safe_message}: {details}"
+            raise AhRequestError(safe_message, response.status)
         if not text:
             return {}
         try:
@@ -235,9 +267,12 @@ class AhApiClient:
         return data
 
     async def _graphql(self, query: str) -> dict[str, Any]:
-        payload = await self._raw_request(
-            "POST", "/graphql", json_body={"query": query, "variables": {}}
-        )
+        try:
+            payload = await self._raw_request(
+                "POST", "/graphql", json_body={"query": query, "variables": {}}
+            )
+        except AhRequestError as err:
+            raise AhGraphQLError(str(err)) from err
         errors = payload.get("errors")
         if errors:
             messages = [str(item.get("message", item)) if isinstance(item, dict) else str(item) for item in errors]
@@ -246,6 +281,10 @@ class AhApiClient:
         if not isinstance(data, dict):
             raise AhTransientError("Albert Heijn GraphQL response has no data object")
         return data
+
+    async def async_validate_connection(self) -> None:
+        """Validate authenticated API access using only the proven base query."""
+        await self._graphql(BASE_FULFILLMENTS_QUERY)
 
     async def async_get_open_deliveries(self, timezone_name: str, fetched_at: datetime) -> tuple[Delivery, ...]:
         """Return open DELIVERY fulfillments, preferring optional ETA fields when supported."""
