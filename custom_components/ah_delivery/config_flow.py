@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from typing import Any, Mapping
 
 import voluptuous as vol
@@ -24,6 +25,8 @@ from .const import (
 from .exceptions import AhAuthError, AhDeliveryError, AhTransientError
 
 CONF_AUTHORIZATION_CODE = "authorization_code"
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _schema() -> vol.Schema:
@@ -49,11 +52,10 @@ class AhDeliveryConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Exchange the code and verify the authenticated GraphQL connection."""
         client = AhApiClient(async_get_clientsession(self.hass))
         tokens = await client.exchange_authorization_code(value)
-        # This succeeds even when the account has no open orders and ensures the
-        # private API is actually usable before a config entry is created.
-        from homeassistant.util import dt as dt_util
-
-        await client.async_get_open_deliveries(self.hass.config.time_zone, dt_util.now())
+        # Validate authentication with the proven slot-only query. Do not run the
+        # optional ETA query during setup: an AH GraphQL schema rejection must never
+        # be presented to the user as an invalid authorization code.
+        await client.async_validate_connection()
         return tokens
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -61,7 +63,8 @@ class AhDeliveryConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             try:
                 tokens = await self._exchange(user_input[CONF_AUTHORIZATION_CODE])
-            except AhAuthError:
+            except AhAuthError as err:
+                _LOGGER.warning("Albert Heijn authorization failed during setup: %s", err)
                 errors["base"] = "invalid_auth"
             except (AhTransientError, AhDeliveryError):
                 errors["base"] = "cannot_connect"
@@ -92,7 +95,8 @@ class AhDeliveryConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             try:
                 tokens = await self._exchange(user_input[CONF_AUTHORIZATION_CODE])
-            except AhAuthError:
+            except AhAuthError as err:
+                _LOGGER.warning("Albert Heijn authorization failed during reauthentication: %s", err)
                 errors["base"] = "invalid_auth"
             except (AhTransientError, AhDeliveryError):
                 errors["base"] = "cannot_connect"
