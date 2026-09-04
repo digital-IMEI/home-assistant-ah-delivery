@@ -15,24 +15,54 @@ class Delivery:
     order_id: int | None
     status: str | None
     status_description: str | None
+    status_code: int | None
     shopping_type: str
+    transaction_completed: bool | None
+    modifiable: bool | None
+    cancellable: bool | None
+    reopenable: bool | None
+    closing_date_time: str | None
     slot_start: datetime
     slot_end: datetime
     slot_display: str | None
     delivery_date_display: str | None
+    delivery_date_display_short: str | None = None
+    delivery_day_display: str | None = None
+    delivery_method: str | None = None
+    delivery_message: str | None = None
+    shift_code: str | None = None
+    home_shop_center_id: int | None = None
+    ride_number: int | None = None
+    ride_sequence_number: int | None = None
+    ride_home_shop_center_id: int | None = None
     eta: datetime | None = None
     eta_lower: datetime | None = None
     eta_upper: datetime | None = None
     eta_status: str | None = None
     eta_observed_at: datetime | None = None
 
-    def best_time(self, now: datetime, eta_max_age_seconds: int = 600) -> tuple[datetime, str]:
-        """Return best arrival timestamp and its source."""
-        if self.eta is not None and self.eta_observed_at is not None:
-            age = (now - self.eta_observed_at).total_seconds()
-            if 0 <= age <= eta_max_age_seconds:
-                return self.eta, "live_eta"
+    def best_time(self, now: datetime, eta_max_age_seconds: int = 900) -> tuple[datetime, str]:
+        """Return best single arrival timestamp and its source."""
+        if self.eta is not None and self.eta_is_fresh(now, eta_max_age_seconds):
+            return self.eta, "live_eta"
         return self.slot_start, "delivery_slot"
+
+    def eta_is_fresh(self, now: datetime, eta_max_age_seconds: int = 900) -> bool:
+        """Whether any observed ETA data is still fresh."""
+        if self.eta_observed_at is None:
+            return False
+        age = (now - self.eta_observed_at).total_seconds()
+        return 0 <= age <= eta_max_age_seconds
+
+    def eta_window(
+        self, now: datetime, eta_max_age_seconds: int = 900
+    ) -> tuple[datetime | None, datetime | None] | None:
+        """Return a fresh ETA lower/upper window if AH supplied one."""
+        if not self.eta_is_fresh(now, eta_max_age_seconds):
+            return None
+        if self.eta_lower is None and self.eta_upper is None:
+            return None
+        return self.eta_lower, self.eta_upper
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +73,7 @@ class DeliveryData:
     next_delivery: Delivery | None
     fetched_at: datetime
     rich_eta_supported: bool | None
+    diagnostics: dict[str, Any]
 
 
 def _parse_clock(value: str) -> time:
@@ -55,11 +86,12 @@ def _parse_clock(value: str) -> time:
     raise ValueError(f"Unsupported AH time value: {value!r}")
 
 
-def _parse_datetime_like(value: Any, tz: ZoneInfo, delivery_date: str | None = None) -> datetime | None:
+def _parse_datetime_like(
+    value: Any, tz: ZoneInfo, delivery_date: str | None = None
+) -> datetime | None:
     if not isinstance(value, str) or not value.strip():
         return None
     raw = value.strip()
-    # Full ISO-8601 timestamps, including Z or an explicit offset.
     try:
         parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
         if parsed.tzinfo is None:
@@ -67,7 +99,6 @@ def _parse_datetime_like(value: Any, tz: ZoneInfo, delivery_date: str | None = N
         return parsed.astimezone(tz)
     except ValueError:
         pass
-    # Time-only values need the delivery date.
     if delivery_date:
         try:
             d = datetime.strptime(delivery_date, "%Y-%m-%d").date()
@@ -77,7 +108,21 @@ def _parse_datetime_like(value: Any, tz: ZoneInfo, delivery_date: str | None = N
     return None
 
 
-def parse_fulfillments(payload: dict[str, Any], timezone_name: str, fetched_at: datetime) -> tuple[Delivery, ...]:
+def _as_optional_str(value: Any) -> str | None:
+    return str(value) if value is not None else None
+
+
+def _as_optional_int(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _as_optional_bool(value: Any) -> bool | None:
+    return value if isinstance(value, bool) else None
+
+
+def parse_fulfillments(
+    payload: dict[str, Any], timezone_name: str, fetched_at: datetime
+) -> tuple[Delivery, ...]:
     """Parse GraphQL fulfillment data; malformed individual entries are ignored."""
     tz = ZoneInfo(timezone_name)
     root = payload.get("orderFulfillments") if isinstance(payload, dict) else None
@@ -102,7 +147,6 @@ def parse_fulfillments(payload: dict[str, Any], timezone_name: str, fetched_at: 
         end = _parse_datetime_like(slot.get("endTime"), tz, date_value)
         if start is None or end is None:
             continue
-        # If AH ever supplies an overnight slot, keep end after start.
         if end < start:
             end += timedelta(days=1)
 
@@ -113,28 +157,42 @@ def parse_fulfillments(payload: dict[str, Any], timezone_name: str, fetched_at: 
             eta = _parse_datetime_like(eta_raw.get("estimated"), tz, date_value)
             eta_lower = _parse_datetime_like(eta_raw.get("lower"), tz, date_value)
             eta_upper = _parse_datetime_like(eta_raw.get("upper"), tz, date_value)
-            if eta_raw.get("status") is not None:
-                eta_status = str(eta_raw.get("status"))
+            eta_status = _as_optional_str(eta_raw.get("status"))
+
+        ride_raw = delivery.get("ride")
+        ride = ride_raw if isinstance(ride_raw, dict) else {}
+        eta_observed = fetched_at if any((eta, eta_lower, eta_upper, eta_status)) else None
 
         deliveries.append(
             Delivery(
-                order_id=item.get("orderId") if isinstance(item.get("orderId"), int) else None,
-                status=str(delivery.get("status")) if delivery.get("status") is not None else None,
-                status_description=(
-                    str(item.get("statusDescription")) if item.get("statusDescription") is not None else None
-                ),
+                order_id=_as_optional_int(item.get("orderId")),
+                status=_as_optional_str(delivery.get("status")),
+                status_description=_as_optional_str(item.get("statusDescription")),
+                status_code=_as_optional_int(item.get("statusCode")),
                 shopping_type="DELIVERY",
+                transaction_completed=_as_optional_bool(item.get("transactionCompleted")),
+                modifiable=_as_optional_bool(item.get("modifiable")),
+                cancellable=_as_optional_bool(item.get("cancellable")),
+                reopenable=_as_optional_bool(item.get("reopenable")),
+                closing_date_time=_as_optional_str(item.get("closingDateTime")),
                 slot_start=start,
                 slot_end=end,
-                slot_display=str(slot.get("timeDisplay")) if slot.get("timeDisplay") is not None else None,
-                delivery_date_display=(
-                    str(slot.get("dateDisplay")) if slot.get("dateDisplay") is not None else None
-                ),
+                slot_display=_as_optional_str(slot.get("timeDisplay")),
+                delivery_date_display=_as_optional_str(slot.get("dateDisplay")),
+                delivery_date_display_short=_as_optional_str(slot.get("dateDisplayShort")),
+                delivery_day_display=_as_optional_str(slot.get("dayDisplay")),
+                delivery_method=_as_optional_str(delivery.get("method")),
+                delivery_message=_as_optional_str(delivery.get("deliveryMessage")),
+                shift_code=_as_optional_str(delivery.get("shiftCode")),
+                home_shop_center_id=_as_optional_int(delivery.get("homeShopCenterId")),
+                ride_number=_as_optional_int(ride.get("number")),
+                ride_sequence_number=_as_optional_int(ride.get("sequenceNumber")),
+                ride_home_shop_center_id=_as_optional_int(ride.get("homeShopCenterId")),
                 eta=eta,
                 eta_lower=eta_lower,
                 eta_upper=eta_upper,
                 eta_status=eta_status,
-                eta_observed_at=fetched_at if eta is not None else None,
+                eta_observed_at=eta_observed,
             )
         )
 
@@ -142,13 +200,10 @@ def parse_fulfillments(payload: dict[str, Any], timezone_name: str, fetched_at: 
     return tuple(deliveries)
 
 
-def select_next_delivery(deliveries: tuple[Delivery, ...], now: datetime) -> Delivery | None:
-    """Select the next relevant delivery.
-
-    A current API response can still report an open order just after its booked
-    slot has ended (for example when the driver is late). Keep such an order for
-    a short grace period, and extend relevance to a current ETA/ETA upper bound.
-    """
+def select_next_delivery(
+    deliveries: tuple[Delivery, ...], now: datetime
+) -> Delivery | None:
+    """Select the next relevant delivery, retaining late active deliveries."""
     grace = timedelta(hours=2)
     for delivery in deliveries:
         relevant_until = delivery.slot_end + grace
