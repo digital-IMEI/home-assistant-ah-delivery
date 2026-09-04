@@ -6,7 +6,7 @@ from homeassistant.const import Platform
 
 DOMAIN = "ah_delivery"
 NAME = "Albert Heijn Delivery"
-PLATFORMS = [Platform.SENSOR]
+PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR]
 
 API_BASE_URL = "https://api.ah.nl"
 LOGIN_BASE_URL = "https://login.ah.nl"
@@ -23,7 +23,12 @@ CONF_MEMBER_ID = "member_id"
 TOKEN_REFRESH_MARGIN = timedelta(minutes=5)
 ETA_MAX_AGE = timedelta(minutes=15)
 
-DEFAULT_UPDATE_INTERVAL = timedelta(minutes=30)
+# Adaptive polling. Far-away deliveries need very little API traffic, while the
+# delivery day becomes progressively more responsive as arrival approaches.
+DEFAULT_UPDATE_INTERVAL = timedelta(hours=3)
+UPDATE_MORE_THAN_7D = timedelta(hours=6)
+UPDATE_WITHIN_7D = timedelta(hours=3)
+UPDATE_WITHIN_48H = timedelta(hours=1)
 UPDATE_WITHIN_24H = timedelta(minutes=15)
 UPDATE_WITHIN_3H = timedelta(minutes=3)
 UPDATE_ACTIVE_ETA = timedelta(minutes=3)
