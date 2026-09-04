@@ -49,7 +49,12 @@ class AhDeliveryCoordinator(DataUpdateCoordinator[DeliveryData]):
             return DEFAULT_UPDATE_INTERVAL
         now = dt_util.now()
         max_age = int(ETA_MAX_AGE.total_seconds())
-        if delivery.eta_is_fresh(now, max_age) or delivery.track_is_fresh(now, max_age):
+        track_live = delivery.track_is_fresh(now, max_age) and (
+            delivery.track_eta_start is not None
+            or delivery.track_eta_end is not None
+            or str(delivery.track_type or "").upper() in {"IN_TRANSIT", "PREPARING"}
+        )
+        if delivery.eta_is_fresh(now, max_age) or track_live:
             return UPDATE_ACTIVE_ETA
         until_start = delivery.slot_start - now
         if until_start <= timedelta(hours=3):
