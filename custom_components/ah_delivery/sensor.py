@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
@@ -21,9 +22,23 @@ from .models import Delivery
 
 
 def _safe_text(value: str | None) -> str | None:
-    if value is None:
-        return None
-    return value[:255]
+    return value[:255] if value is not None else None
+
+
+def _window_text(start: datetime | None, end: datetime | None) -> str | None:
+    if start and end:
+        if start == end:
+            return f"{start:%H:%M}"
+        return f"{start:%H:%M}–{end:%H:%M}"
+    if start:
+        return f"vanaf {start:%H:%M}"
+    if end:
+        return f"voor {end:%H:%M}"
+    return None
+
+
+def _max_age() -> int:
+    return int(ETA_MAX_AGE.total_seconds())
 
 
 async def async_setup_entry(
@@ -32,31 +47,100 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up AH Delivery sensor entities."""
-    runtime: AhDeliveryRuntimeData = entry.runtime_data
-    coordinator = runtime.coordinator
-    async_add_entities(
-        [
-            AhNextDeliverySensor(coordinator, entry),
-            AhSlotStartSensor(coordinator, entry),
-            AhSlotEndSensor(coordinator, entry),
-            AhLiveEtaSensor(coordinator, entry),
-            AhEtaLowerSensor(coordinator, entry),
-            AhEtaUpperSensor(coordinator, entry),
-            AhEtaWindowSensor(coordinator, entry),
-            AhEtaStatusSensor(coordinator, entry),
-            AhDeliveryStatusSensor(coordinator, entry),
-            AhDeliveryMessageSensor(coordinator, entry),
-            AhDeliveryMethodSensor(coordinator, entry),
-            AhRideNumberSensor(coordinator, entry),
-            AhRideSequenceSensor(coordinator, entry),
-            AhShiftCodeSensor(coordinator, entry),
-            AhHomeShopCenterSensor(coordinator, entry),
-            AhSlotDisplaySensor(coordinator, entry),
-            AhDateDisplaySensor(coordinator, entry),
-            AhStatusCodeSensor(coordinator, entry),
-            AhApiDiagnosticsSensor(coordinator, entry),
-        ]
+    coordinator: AhDeliveryCoordinator = entry.runtime_data.coordinator
+
+    entities: list[SensorEntity] = [
+        AhNextDeliverySensor(coordinator, entry),
+        AhEtaWindowSensor(coordinator, entry),
+        AhTrackEtaWindowSensor(coordinator, entry),
+        AhExpectedArrivalWindowSensor(coordinator, entry),
+        AhExpectedSourceSensor(coordinator, entry),
+        AhLastUpdateSensor(coordinator, entry),
+        AhUpdateIntervalSensor(coordinator, entry),
+        AhApiDiagnosticsSensor(coordinator, entry),
+    ]
+
+    field_specs: list[tuple[str, str, Callable[[Delivery], Any], SensorDeviceClass | None]] = [
+        ("slot_start", "slot_start", lambda d: d.slot_start, SensorDeviceClass.TIMESTAMP),
+        ("slot_end", "slot_end", lambda d: d.slot_end, SensorDeviceClass.TIMESTAMP),
+        (
+            "live_eta",
+            "live_eta",
+            lambda d: d.eta if d.eta_is_fresh(dt_util.now(), _max_age()) else None,
+            SensorDeviceClass.TIMESTAMP,
+        ),
+        (
+            "eta_lower",
+            "eta_lower",
+            lambda d: d.eta_lower if d.eta_is_fresh(dt_util.now(), _max_age()) else None,
+            SensorDeviceClass.TIMESTAMP,
+        ),
+        (
+            "eta_upper",
+            "eta_upper",
+            lambda d: d.eta_upper if d.eta_is_fresh(dt_util.now(), _max_age()) else None,
+            SensorDeviceClass.TIMESTAMP,
+        ),
+        ("eta_status", "eta_status", lambda d: _safe_text(d.eta_status), None),
+        ("delivery_status", "delivery_status", lambda d: _safe_text(d.status), None),
+        ("delivery_message", "delivery_message", lambda d: _safe_text(d.delivery_message), None),
+        ("delivery_method", "delivery_method", lambda d: _safe_text(d.delivery_method), None),
+        ("ride_number", "ride_number", lambda d: d.ride_number, None),
+        ("ride_sequence", "ride_sequence", lambda d: d.ride_sequence_number, None),
+        ("shift_code", "shift_code", lambda d: _safe_text(d.shift_code), None),
+        ("home_shop_center", "home_shop_center", lambda d: d.home_shop_center_id, None),
+        ("slot_display", "slot_display", lambda d: _safe_text(d.slot_display), None),
+        (
+            "date_display",
+            "date_display",
+            lambda d: _safe_text(
+                d.delivery_date_display_short
+                or d.delivery_date_display
+                or d.delivery_day_display
+            ),
+            None,
+        ),
+        ("status_code", "status_code", lambda d: d.status_code, None),
+        ("track_trace_type", "track_trace_type", lambda d: _safe_text(d.track_type), None),
+        ("track_order_type", "track_order_type", lambda d: _safe_text(d.track_order_type), None),
+        ("track_message", "track_message", lambda d: _safe_text(d.track_message), None),
+        (
+            "track_eta_start",
+            "track_eta_start",
+            lambda d: d.track_eta_start if d.track_is_fresh(dt_util.now(), _max_age()) else None,
+            SensorDeviceClass.TIMESTAMP,
+        ),
+        (
+            "track_eta_end",
+            "track_eta_end",
+            lambda d: d.track_eta_end if d.track_is_fresh(dt_util.now(), _max_age()) else None,
+            SensorDeviceClass.TIMESTAMP,
+        ),
+        (
+            "realised_delivery_time",
+            "realised_delivery_time",
+            lambda d: d.track_realised_delivery_time,
+            SensorDeviceClass.TIMESTAMP,
+        ),
+        (
+            "track_observed_at",
+            "track_observed_at",
+            lambda d: d.track_observed_at,
+            SensorDeviceClass.TIMESTAMP,
+        ),
+    ]
+    entities.extend(
+        AhDiagnosticFieldSensor(
+            coordinator,
+            entry,
+            unique_key=unique_key,
+            translation_key=translation_key,
+            value_getter=value_getter,
+            device_class=device_class,
+        )
+        for unique_key, translation_key, value_getter, device_class in field_specs
     )
+    async_add_entities(entities)
 
 
 class AhDeliveryBaseEntity(CoordinatorEntity[AhDeliveryCoordinator]):
@@ -82,6 +166,38 @@ class AhDeliveryBaseEntity(CoordinatorEntity[AhDeliveryCoordinator]):
         return self.coordinator.data.next_delivery if self.coordinator.data else None
 
 
+class _DiagnosticSensor(AhDeliveryBaseEntity, SensorEntity):
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = True
+
+
+class AhDiagnosticFieldSensor(_DiagnosticSensor):
+    """Small generic diagnostic field entity while capture is intentionally broad."""
+
+    def __init__(
+        self,
+        coordinator: AhDeliveryCoordinator,
+        entry: AhDeliveryConfigEntry,
+        *,
+        unique_key: str,
+        translation_key: str,
+        value_getter: Callable[[Delivery], Any],
+        device_class: SensorDeviceClass | None = None,
+    ) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{self._account_key}_{unique_key}"
+        self._attr_translation_key = translation_key
+        self._value_getter = value_getter
+        if device_class is not None:
+            self._attr_device_class = device_class
+
+    @property
+    def native_value(self) -> Any:
+        if self.delivery is None:
+            return None
+        return self._value_getter(self.delivery)
+
+
 class AhNextDeliverySensor(AhDeliveryBaseEntity, SensorEntity):
     """Best available timestamp for the next delivery."""
 
@@ -96,9 +212,7 @@ class AhNextDeliverySensor(AhDeliveryBaseEntity, SensorEntity):
     def native_value(self) -> datetime | None:
         if not self.delivery:
             return None
-        return self.delivery.best_time(
-            dt_util.now(), int(ETA_MAX_AGE.total_seconds())
-        )[0]
+        return self.delivery.best_time(dt_util.now(), _max_age())[0]
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -111,12 +225,16 @@ class AhNextDeliverySensor(AhDeliveryBaseEntity, SensorEntity):
         }
         if delivery is None:
             return attrs
-        _, source = delivery.best_time(
-            dt_util.now(), int(ETA_MAX_AGE.total_seconds())
+        _, source = delivery.best_time(dt_util.now(), _max_age())
+        window_start, window_end, window_source = delivery.expected_window(
+            dt_util.now(), _max_age()
         )
         attrs.update(
             {
                 "source": source,
+                "expected_window_source": window_source,
+                "expected_window_start": window_start.isoformat() if window_start else None,
+                "expected_window_end": window_end.isoformat() if window_end else None,
                 "delivery_date": delivery.slot_start.date().isoformat(),
                 "slot_start": delivery.slot_start.isoformat(),
                 "slot_end": delivery.slot_end.isoformat(),
@@ -125,11 +243,18 @@ class AhNextDeliverySensor(AhDeliveryBaseEntity, SensorEntity):
                 "eta_lower": delivery.eta_lower.isoformat() if delivery.eta_lower else None,
                 "eta_upper": delivery.eta_upper.isoformat() if delivery.eta_upper else None,
                 "eta_status": delivery.eta_status,
-                "eta_observed_at": (
-                    delivery.eta_observed_at.isoformat()
-                    if delivery.eta_observed_at
+                "eta_observed_at": delivery.eta_observed_at.isoformat() if delivery.eta_observed_at else None,
+                "track_type": delivery.track_type,
+                "track_order_type": delivery.track_order_type,
+                "track_message": delivery.track_message,
+                "track_eta_start": delivery.track_eta_start.isoformat() if delivery.track_eta_start else None,
+                "track_eta_end": delivery.track_eta_end.isoformat() if delivery.track_eta_end else None,
+                "track_realised_delivery_time": (
+                    delivery.track_realised_delivery_time.isoformat()
+                    if delivery.track_realised_delivery_time
                     else None
                 ),
+                "track_observed_at": delivery.track_observed_at.isoformat() if delivery.track_observed_at else None,
                 "delivery_status": delivery.status,
                 "status_description": delivery.status_description,
                 "delivery_message": delivery.delivery_message,
@@ -138,91 +263,6 @@ class AhNextDeliverySensor(AhDeliveryBaseEntity, SensorEntity):
             }
         )
         return attrs
-
-
-class _DiagnosticSensor(AhDeliveryBaseEntity, SensorEntity):
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-    # This release is deliberately diagnostic-heavy. New diagnostic entities are
-    # enabled so tonight's one-off delivery cannot pass without being captured.
-    _attr_entity_registry_enabled_default = True
-
-
-class _TimestampDiagnostic(_DiagnosticSensor):
-    _attr_device_class = SensorDeviceClass.TIMESTAMP
-
-
-class AhSlotStartSensor(_TimestampDiagnostic):
-    _attr_translation_key = "slot_start"
-
-    def __init__(self, coordinator: AhDeliveryCoordinator, entry: AhDeliveryConfigEntry) -> None:
-        super().__init__(coordinator, entry)
-        self._attr_unique_id = f"{self._account_key}_slot_start"
-
-    @property
-    def native_value(self) -> datetime | None:
-        return self.delivery.slot_start if self.delivery else None
-
-
-class AhSlotEndSensor(_TimestampDiagnostic):
-    _attr_translation_key = "slot_end"
-
-    def __init__(self, coordinator: AhDeliveryCoordinator, entry: AhDeliveryConfigEntry) -> None:
-        super().__init__(coordinator, entry)
-        self._attr_unique_id = f"{self._account_key}_slot_end"
-
-    @property
-    def native_value(self) -> datetime | None:
-        return self.delivery.slot_end if self.delivery else None
-
-
-class AhLiveEtaSensor(_TimestampDiagnostic):
-    _attr_translation_key = "live_eta"
-
-    def __init__(self, coordinator: AhDeliveryCoordinator, entry: AhDeliveryConfigEntry) -> None:
-        super().__init__(coordinator, entry)
-        self._attr_unique_id = f"{self._account_key}_live_eta"
-
-    @property
-    def native_value(self) -> datetime | None:
-        if not self.delivery:
-            return None
-        if not self.delivery.eta_is_fresh(
-            dt_util.now(), int(ETA_MAX_AGE.total_seconds())
-        ):
-            return None
-        return self.delivery.eta
-
-
-class AhEtaLowerSensor(_TimestampDiagnostic):
-    _attr_translation_key = "eta_lower"
-
-    def __init__(self, coordinator: AhDeliveryCoordinator, entry: AhDeliveryConfigEntry) -> None:
-        super().__init__(coordinator, entry)
-        self._attr_unique_id = f"{self._account_key}_eta_lower"
-
-    @property
-    def native_value(self) -> datetime | None:
-        if not self.delivery or not self.delivery.eta_is_fresh(
-            dt_util.now(), int(ETA_MAX_AGE.total_seconds())
-        ):
-            return None
-        return self.delivery.eta_lower
-
-
-class AhEtaUpperSensor(_TimestampDiagnostic):
-    _attr_translation_key = "eta_upper"
-
-    def __init__(self, coordinator: AhDeliveryCoordinator, entry: AhDeliveryConfigEntry) -> None:
-        super().__init__(coordinator, entry)
-        self._attr_unique_id = f"{self._account_key}_eta_upper"
-
-    @property
-    def native_value(self) -> datetime | None:
-        if not self.delivery or not self.delivery.eta_is_fresh(
-            dt_util.now(), int(ETA_MAX_AGE.total_seconds())
-        ):
-            return None
-        return self.delivery.eta_upper
 
 
 class AhEtaWindowSensor(_DiagnosticSensor):
@@ -236,157 +276,81 @@ class AhEtaWindowSensor(_DiagnosticSensor):
     def native_value(self) -> str | None:
         if not self.delivery:
             return None
-        window = self.delivery.eta_window(
-            dt_util.now(), int(ETA_MAX_AGE.total_seconds())
-        )
-        if window is None:
-            return None
-        lower, upper = window
-        if lower and upper:
-            return f"{lower:%H:%M}–{upper:%H:%M}"
-        if lower:
-            return f"vanaf {lower:%H:%M}"
-        if upper:
-            return f"voor {upper:%H:%M}"
-        return None
+        window = self.delivery.eta_window(dt_util.now(), _max_age())
+        return _window_text(*window) if window is not None else None
 
 
-class AhEtaStatusSensor(_DiagnosticSensor):
-    _attr_translation_key = "eta_status"
+class AhTrackEtaWindowSensor(_DiagnosticSensor):
+    _attr_translation_key = "track_eta_window"
 
     def __init__(self, coordinator: AhDeliveryCoordinator, entry: AhDeliveryConfigEntry) -> None:
         super().__init__(coordinator, entry)
-        self._attr_unique_id = f"{self._account_key}_eta_status"
-
-    @property
-    def native_value(self) -> str | None:
-        return _safe_text(self.delivery.eta_status) if self.delivery else None
-
-
-class AhDeliveryStatusSensor(_DiagnosticSensor):
-    _attr_translation_key = "delivery_status"
-
-    def __init__(self, coordinator: AhDeliveryCoordinator, entry: AhDeliveryConfigEntry) -> None:
-        super().__init__(coordinator, entry)
-        self._attr_unique_id = f"{self._account_key}_delivery_status"
-
-    @property
-    def native_value(self) -> str | None:
-        return _safe_text(self.delivery.status) if self.delivery else None
-
-
-class AhDeliveryMessageSensor(_DiagnosticSensor):
-    _attr_translation_key = "delivery_message"
-
-    def __init__(self, coordinator: AhDeliveryCoordinator, entry: AhDeliveryConfigEntry) -> None:
-        super().__init__(coordinator, entry)
-        self._attr_unique_id = f"{self._account_key}_delivery_message"
-
-    @property
-    def native_value(self) -> str | None:
-        return _safe_text(self.delivery.delivery_message) if self.delivery else None
-
-
-class AhDeliveryMethodSensor(_DiagnosticSensor):
-    _attr_translation_key = "delivery_method"
-
-    def __init__(self, coordinator: AhDeliveryCoordinator, entry: AhDeliveryConfigEntry) -> None:
-        super().__init__(coordinator, entry)
-        self._attr_unique_id = f"{self._account_key}_delivery_method"
-
-    @property
-    def native_value(self) -> str | None:
-        return _safe_text(self.delivery.delivery_method) if self.delivery else None
-
-
-class AhRideNumberSensor(_DiagnosticSensor):
-    _attr_translation_key = "ride_number"
-
-    def __init__(self, coordinator: AhDeliveryCoordinator, entry: AhDeliveryConfigEntry) -> None:
-        super().__init__(coordinator, entry)
-        self._attr_unique_id = f"{self._account_key}_ride_number"
-
-    @property
-    def native_value(self) -> int | None:
-        return self.delivery.ride_number if self.delivery else None
-
-
-class AhRideSequenceSensor(_DiagnosticSensor):
-    _attr_translation_key = "ride_sequence"
-
-    def __init__(self, coordinator: AhDeliveryCoordinator, entry: AhDeliveryConfigEntry) -> None:
-        super().__init__(coordinator, entry)
-        self._attr_unique_id = f"{self._account_key}_ride_sequence"
-
-    @property
-    def native_value(self) -> int | None:
-        return self.delivery.ride_sequence_number if self.delivery else None
-
-
-class AhShiftCodeSensor(_DiagnosticSensor):
-    _attr_translation_key = "shift_code"
-
-    def __init__(self, coordinator: AhDeliveryCoordinator, entry: AhDeliveryConfigEntry) -> None:
-        super().__init__(coordinator, entry)
-        self._attr_unique_id = f"{self._account_key}_shift_code"
-
-    @property
-    def native_value(self) -> str | None:
-        return _safe_text(self.delivery.shift_code) if self.delivery else None
-
-
-class AhHomeShopCenterSensor(_DiagnosticSensor):
-    _attr_translation_key = "home_shop_center"
-
-    def __init__(self, coordinator: AhDeliveryCoordinator, entry: AhDeliveryConfigEntry) -> None:
-        super().__init__(coordinator, entry)
-        self._attr_unique_id = f"{self._account_key}_home_shop_center"
-
-    @property
-    def native_value(self) -> int | None:
-        return self.delivery.home_shop_center_id if self.delivery else None
-
-
-class AhSlotDisplaySensor(_DiagnosticSensor):
-    _attr_translation_key = "slot_display"
-
-    def __init__(self, coordinator: AhDeliveryCoordinator, entry: AhDeliveryConfigEntry) -> None:
-        super().__init__(coordinator, entry)
-        self._attr_unique_id = f"{self._account_key}_slot_display"
-
-    @property
-    def native_value(self) -> str | None:
-        return _safe_text(self.delivery.slot_display) if self.delivery else None
-
-
-class AhDateDisplaySensor(_DiagnosticSensor):
-    _attr_translation_key = "date_display"
-
-    def __init__(self, coordinator: AhDeliveryCoordinator, entry: AhDeliveryConfigEntry) -> None:
-        super().__init__(coordinator, entry)
-        self._attr_unique_id = f"{self._account_key}_date_display"
+        self._attr_unique_id = f"{self._account_key}_track_eta_window"
 
     @property
     def native_value(self) -> str | None:
         if not self.delivery:
             return None
-        return _safe_text(
-            self.delivery.delivery_date_display_short
-            or self.delivery.delivery_date_display
-            or self.delivery.delivery_day_display
-        )
+        window = self.delivery.track_window(dt_util.now(), _max_age())
+        return _window_text(*window) if window is not None else None
 
 
-class AhStatusCodeSensor(_DiagnosticSensor):
-    _attr_translation_key = "status_code"
+class AhExpectedArrivalWindowSensor(_DiagnosticSensor):
+    _attr_translation_key = "expected_arrival_window"
 
     def __init__(self, coordinator: AhDeliveryCoordinator, entry: AhDeliveryConfigEntry) -> None:
         super().__init__(coordinator, entry)
-        self._attr_unique_id = f"{self._account_key}_status_code"
+        self._attr_unique_id = f"{self._account_key}_expected_arrival_window"
+
+    @property
+    def native_value(self) -> str | None:
+        if not self.delivery:
+            return None
+        start, end, _ = self.delivery.expected_window(dt_util.now(), _max_age())
+        return _window_text(start, end)
+
+
+class AhExpectedSourceSensor(_DiagnosticSensor):
+    _attr_translation_key = "expected_source"
+
+    def __init__(self, coordinator: AhDeliveryCoordinator, entry: AhDeliveryConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{self._account_key}_expected_source"
+
+    @property
+    def native_value(self) -> str | None:
+        if not self.delivery:
+            return None
+        return self.delivery.expected_window(dt_util.now(), _max_age())[2]
+
+
+class AhLastUpdateSensor(_DiagnosticSensor):
+    _attr_translation_key = "last_update"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def __init__(self, coordinator: AhDeliveryCoordinator, entry: AhDeliveryConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{self._account_key}_last_update"
+
+    @property
+    def native_value(self) -> datetime | None:
+        return self.coordinator.data.fetched_at if self.coordinator.data else None
+
+
+class AhUpdateIntervalSensor(_DiagnosticSensor):
+    _attr_translation_key = "update_interval"
+
+    def __init__(self, coordinator: AhDeliveryCoordinator, entry: AhDeliveryConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{self._account_key}_update_interval"
 
     @property
     def native_value(self) -> int | None:
-        return self.delivery.status_code if self.delivery else None
+        return (
+            int(self.coordinator.update_interval.total_seconds())
+            if self.coordinator.update_interval
+            else None
+        )
 
 
 class AhApiDiagnosticsSensor(_DiagnosticSensor):
@@ -404,9 +368,13 @@ class AhApiDiagnosticsSensor(_DiagnosticSensor):
         if not data:
             return "no_data"
         probes = data.diagnostics.get("probes", {})
-        rich = probes.get("rich_fulfillments", {}) if isinstance(probes, dict) else {}
-        if isinstance(rich, dict) and rich.get("ok") is True:
-            return "rich"
+        if isinstance(probes, dict):
+            track = probes.get("track_and_trace_v2", {})
+            if isinstance(track, dict) and track.get("ok") is True and track.get("available") is True:
+                return "track_and_trace"
+            rich = probes.get("rich_fulfillments", {})
+            if isinstance(rich, dict) and rich.get("ok") is True:
+                return "rich"
         return "fallback"
 
     @property
@@ -449,11 +417,18 @@ class AhApiDiagnosticsSensor(_DiagnosticSensor):
                 "eta_lower": delivery.eta_lower.isoformat() if delivery.eta_lower else None,
                 "eta_upper": delivery.eta_upper.isoformat() if delivery.eta_upper else None,
                 "eta_status": delivery.eta_status,
-                "eta_observed_at": (
-                    delivery.eta_observed_at.isoformat()
-                    if delivery.eta_observed_at
+                "eta_observed_at": delivery.eta_observed_at.isoformat() if delivery.eta_observed_at else None,
+                "track_type": delivery.track_type,
+                "track_order_type": delivery.track_order_type,
+                "track_message": delivery.track_message,
+                "track_eta_start": delivery.track_eta_start.isoformat() if delivery.track_eta_start else None,
+                "track_eta_end": delivery.track_eta_end.isoformat() if delivery.track_eta_end else None,
+                "track_realised_delivery_time": (
+                    delivery.track_realised_delivery_time.isoformat()
+                    if delivery.track_realised_delivery_time
                     else None
                 ),
+                "track_observed_at": delivery.track_observed_at.isoformat() if delivery.track_observed_at else None,
             }
         return {
             "captured_at": data.fetched_at.isoformat(),
