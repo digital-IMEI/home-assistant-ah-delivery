@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -17,7 +19,7 @@ async def async_fetch_track_trace(
     client: AhApiClient,
     order_id: int,
     timezone_name: str,
-    fetched_at,
+    fetched_at: datetime,
     delivery_date: str | None,
 ) -> tuple[TrackTraceData | None, dict[str, Any]]:
     """Fetch Track & Trace without ever making it a hard dependency.
@@ -33,6 +35,8 @@ async def async_fetch_track_trace(
         return None, {"ok": False, "error": str(err)}
 
     track = parse_track_trace(data, timezone_name, fetched_at, delivery_date)
+    if track is not None and track.order_id is None:
+        track = replace(track, order_id=order_id)
     return track, {
         "ok": True,
         "available": track is not None,
