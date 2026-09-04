@@ -2,10 +2,24 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
+
+
+@dataclass(frozen=True, slots=True)
+class TrackTraceData:
+    """Track & Trace V2 data for one AH order."""
+
+    order_id: int | None
+    track_type: str | None
+    order_type: str | None
+    message: str | None
+    eta_start: datetime | None
+    eta_end: datetime | None
+    realised_delivery_time: datetime | None
+    observed_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,29 +54,71 @@ class Delivery:
     eta_upper: datetime | None = None
     eta_status: str | None = None
     eta_observed_at: datetime | None = None
-
-    def best_time(self, now: datetime, eta_max_age_seconds: int = 900) -> tuple[datetime, str]:
-        """Return best single arrival timestamp and its source."""
-        if self.eta is not None and self.eta_is_fresh(now, eta_max_age_seconds):
-            return self.eta, "live_eta"
-        return self.slot_start, "delivery_slot"
+    track_type: str | None = None
+    track_order_type: str | None = None
+    track_message: str | None = None
+    track_eta_start: datetime | None = None
+    track_eta_end: datetime | None = None
+    track_realised_delivery_time: datetime | None = None
+    track_observed_at: datetime | None = None
 
     def eta_is_fresh(self, now: datetime, eta_max_age_seconds: int = 900) -> bool:
-        """Whether any observed ETA data is still fresh."""
+        """Whether fulfillment ETA data is still fresh."""
         if self.eta_observed_at is None:
             return False
         age = (now - self.eta_observed_at).total_seconds()
         return 0 <= age <= eta_max_age_seconds
 
+    def track_is_fresh(self, now: datetime, eta_max_age_seconds: int = 900) -> bool:
+        """Whether Track & Trace data is still fresh."""
+        if self.track_observed_at is None:
+            return False
+        age = (now - self.track_observed_at).total_seconds()
+        return 0 <= age <= eta_max_age_seconds
+
+    def best_time(self, now: datetime, eta_max_age_seconds: int = 900) -> tuple[datetime, str]:
+        """Return the best single timestamp and an explicit source label."""
+        if self.eta is not None and self.eta_is_fresh(now, eta_max_age_seconds):
+            return self.eta, "live_eta"
+        if self.track_eta_start is not None and self.track_is_fresh(now, eta_max_age_seconds):
+            return self.track_eta_start, "track_and_trace_window"
+        if self.eta_lower is not None and self.eta_is_fresh(now, eta_max_age_seconds):
+            return self.eta_lower, "eta_window"
+        return self.slot_start, "delivery_slot"
+
     def eta_window(
         self, now: datetime, eta_max_age_seconds: int = 900
     ) -> tuple[datetime | None, datetime | None] | None:
-        """Return a fresh ETA lower/upper window if AH supplied one."""
+        """Return a fresh fulfillment ETA lower/upper window."""
         if not self.eta_is_fresh(now, eta_max_age_seconds):
             return None
         if self.eta_lower is None and self.eta_upper is None:
             return None
         return self.eta_lower, self.eta_upper
+
+    def track_window(
+        self, now: datetime, eta_max_age_seconds: int = 900
+    ) -> tuple[datetime | None, datetime | None] | None:
+        """Return the fresh Track & Trace ETA range."""
+        if not self.track_is_fresh(now, eta_max_age_seconds):
+            return None
+        if self.track_eta_start is None and self.track_eta_end is None:
+            return None
+        return self.track_eta_start, self.track_eta_end
+
+    def expected_window(
+        self, now: datetime, eta_max_age_seconds: int = 900
+    ) -> tuple[datetime | None, datetime | None, str]:
+        """Return the best available arrival window and its source."""
+        track = self.track_window(now, eta_max_age_seconds)
+        if track is not None:
+            return track[0], track[1], "track_and_trace_v2"
+        eta = self.eta_window(now, eta_max_age_seconds)
+        if eta is not None:
+            return eta[0], eta[1], "fulfillment_eta"
+        if self.eta is not None and self.eta_is_fresh(now, eta_max_age_seconds):
+            return self.eta, self.eta, "fulfillment_eta"
+        return self.slot_start, self.slot_end, "delivery_slot"
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,6 +256,74 @@ def parse_fulfillments(
     return tuple(deliveries)
 
 
+def parse_track_trace(
+    payload: dict[str, Any],
+    timezone_name: str,
+    fetched_at: datetime,
+    delivery_date: str | None = None,
+) -> TrackTraceData | None:
+    """Parse the documented order.delivery.trackAndTraceV2 object."""
+    if not isinstance(payload, dict):
+        return None
+    order = payload.get("order")
+    if not isinstance(order, dict):
+        return None
+    delivery = order.get("delivery")
+    if not isinstance(delivery, dict):
+        return None
+    track = delivery.get("trackAndTraceV2")
+    if not isinstance(track, dict):
+        return None
+
+    eta_block = track.get("etaBlock")
+    eta_range = eta_block.get("range") if isinstance(eta_block, dict) else None
+    if not isinstance(eta_range, dict):
+        eta_range = {}
+    tz = ZoneInfo(timezone_name)
+    return TrackTraceData(
+        order_id=_as_optional_int(track.get("orderId")),
+        track_type=_as_optional_str(track.get("type")),
+        order_type=_as_optional_str(track.get("orderType")),
+        message=_as_optional_str(track.get("message")),
+        eta_start=_parse_datetime_like(eta_range.get("start"), tz, delivery_date),
+        eta_end=_parse_datetime_like(eta_range.get("end"), tz, delivery_date),
+        realised_delivery_time=_parse_datetime_like(
+            track.get("realisedDeliveryTime"), tz, delivery_date
+        ),
+        observed_at=fetched_at,
+    )
+
+
+def apply_track_trace(
+    deliveries: tuple[Delivery, ...], track: TrackTraceData | None
+) -> tuple[Delivery, ...]:
+    """Attach Track & Trace data to the matching delivery without mutating input."""
+    if track is None:
+        return deliveries
+    enriched: list[Delivery] = []
+    for delivery in deliveries:
+        if (
+            track.order_id is not None
+            and delivery.order_id is not None
+            and track.order_id != delivery.order_id
+        ):
+            enriched.append(delivery)
+            continue
+        enriched.append(
+            replace(
+                delivery,
+                track_type=track.track_type,
+                track_order_type=track.order_type,
+                track_message=track.message,
+                track_eta_start=track.eta_start,
+                track_eta_end=track.eta_end,
+                track_realised_delivery_time=track.realised_delivery_time,
+                track_observed_at=track.observed_at,
+            )
+        )
+    return tuple(enriched)
+
+
 def select_next_delivery(
     deliveries: tuple[Delivery, ...], now: datetime
 ) -> Delivery | None:
@@ -207,7 +331,13 @@ def select_next_delivery(
     grace = timedelta(hours=2)
     for delivery in deliveries:
         relevant_until = delivery.slot_end + grace
-        for candidate in (delivery.eta, delivery.eta_upper):
+        for candidate in (
+            delivery.eta,
+            delivery.eta_upper,
+            delivery.track_eta_start,
+            delivery.track_eta_end,
+            delivery.track_realised_delivery_time,
+        ):
             if candidate is not None and candidate > relevant_until:
                 relevant_until = candidate
         if relevant_until >= now:
