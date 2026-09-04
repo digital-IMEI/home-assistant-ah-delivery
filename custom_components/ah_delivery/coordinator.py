@@ -46,8 +46,7 @@ class AhDeliveryCoordinator(DataUpdateCoordinator[DeliveryData]):
         if delivery is None:
             return DEFAULT_UPDATE_INTERVAL
         now = dt_util.now()
-        _, source = delivery.best_time(now, int(ETA_MAX_AGE.total_seconds()))
-        if source == "live_eta":
+        if delivery.eta_is_fresh(now, int(ETA_MAX_AGE.total_seconds())):
             return UPDATE_ACTIVE_ETA
         until_start = delivery.slot_start - now
         if until_start <= timedelta(hours=3):
@@ -63,14 +62,18 @@ class AhDeliveryCoordinator(DataUpdateCoordinator[DeliveryData]):
                 self.hass.config.time_zone, fetched_at
             )
         except AhAuthError as err:
-            raise ConfigEntryAuthFailed("Albert Heijn authentication needs to be renewed") from err
+            raise ConfigEntryAuthFailed(
+                "Albert Heijn authentication needs to be renewed"
+            ) from err
         except AhRateLimitError as err:
             self._rate_limit_backoff = min(self._rate_limit_backoff + 1, 4)
             minutes = (10, 20, 40, 60)[self._rate_limit_backoff - 1]
             if err.retry_after:
                 minutes = max(minutes, (err.retry_after + 59) // 60)
             self.update_interval = timedelta(minutes=minutes)
-            raise UpdateFailed(f"Albert Heijn rate limited requests; backing off for {minutes} minutes") from err
+            raise UpdateFailed(
+                f"Albert Heijn rate limited requests; backing off for {minutes} minutes"
+            ) from err
         except AhTransientError as err:
             raise UpdateFailed(str(err)) from err
 
@@ -81,6 +84,7 @@ class AhDeliveryCoordinator(DataUpdateCoordinator[DeliveryData]):
             next_delivery=next_delivery,
             fetched_at=fetched_at,
             rich_eta_supported=self.client.rich_query_supported,
+            diagnostics=self.client.diagnostic_snapshot,
         )
         self.update_interval = self._choose_interval(data)
         return data
