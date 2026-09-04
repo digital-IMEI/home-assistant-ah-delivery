@@ -48,11 +48,18 @@ async def async_get_config_entry_diagnostics(
                 "eta_lower": delivery.eta_lower.isoformat() if delivery.eta_lower else None,
                 "eta_upper": delivery.eta_upper.isoformat() if delivery.eta_upper else None,
                 "eta_status": delivery.eta_status,
-                "eta_observed_at": (
-                    delivery.eta_observed_at.isoformat()
-                    if delivery.eta_observed_at
+                "eta_observed_at": delivery.eta_observed_at.isoformat() if delivery.eta_observed_at else None,
+                "track_type": delivery.track_type,
+                "track_order_type": delivery.track_order_type,
+                "track_message": delivery.track_message,
+                "track_eta_start": delivery.track_eta_start.isoformat() if delivery.track_eta_start else None,
+                "track_eta_end": delivery.track_eta_end.isoformat() if delivery.track_eta_end else None,
+                "track_realised_delivery_time": (
+                    delivery.track_realised_delivery_time.isoformat()
+                    if delivery.track_realised_delivery_time
                     else None
                 ),
+                "track_observed_at": delivery.track_observed_at.isoformat() if delivery.track_observed_at else None,
                 "ride_number": delivery.ride_number,
                 "ride_sequence_number": delivery.ride_sequence_number,
                 "shift_code": delivery.shift_code,
@@ -61,7 +68,5 @@ async def async_get_config_entry_diagnostics(
             if delivery
             else None
         ),
-        # This snapshot is sanitized before it reaches the coordinator: tokens,
-        # account identifiers, addresses and plain order IDs are removed.
         "api_diagnostics": data.diagnostics if data else {},
     }
