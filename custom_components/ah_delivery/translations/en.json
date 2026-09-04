@@ -54,6 +54,9 @@
       "last_update": {"name": "Last API update"},
       "update_interval": {"name": "Update interval seconds"},
       "api_diagnostics": {"name": "API diagnostics"}
+    },
+    "binary_sensor": {
+      "delivery_today": {"name": "Delivery today"}
     }
   }
 }
