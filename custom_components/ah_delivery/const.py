@@ -54,9 +54,6 @@ query OrderFulfillments {
 }
 """
 
-# Documented by the AH GraphQL schema snapshot and intentionally kept separate
-# from the proven base query. A rejection of this query must never break the
-# integration; independent probes below still collect useful data.
 RICH_FULFILLMENTS_QUERY = """
 query OrderFulfillmentsDiagnostics {
   orderFulfillments(status: OPEN) {
@@ -102,8 +99,6 @@ query OrderFulfillmentsDiagnostics {
 }
 """
 
-# Minimal, independent probes. These are deliberately small so that a field in
-# one diagnostic area cannot hide data from another area.
 ETA_PROBE_QUERY = """
 query OrderFulfillmentsEtaProbe {
   orderFulfillments(status: OPEN) {
@@ -147,6 +142,36 @@ query OrderFulfillmentsRideProbe {
           startTime
           endTime
         }
+      }
+    }
+  }
+}
+"""
+
+# Verified in appie-go's current AH API documentation. The order id is inserted as
+# an integer literal so the existing proven GraphQL request path can be reused
+# without changing authentication or the working fulfillment calls.
+TRACK_TRACE_QUERY_TEMPLATE = """
+query FetchOrderTrackTrace {
+  order(id: __ORDER_ID__) {
+    __typename
+    delivery {
+      __typename
+      trackAndTraceV2 {
+        __typename
+        orderId
+        type
+        orderType
+        message
+        etaBlock {
+          __typename
+          range {
+            __typename
+            start
+            end
+          }
+        }
+        realisedDeliveryTime
       }
     }
   }
