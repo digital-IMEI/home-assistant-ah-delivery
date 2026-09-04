@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import timedelta
 import logging
 
@@ -21,7 +22,8 @@ from .const import (
     UPDATE_WITHIN_3H,
 )
 from .exceptions import AhAuthError, AhRateLimitError, AhTransientError
-from .models import DeliveryData, select_next_delivery
+from .models import DeliveryData, apply_track_trace, select_next_delivery
+from .track_trace import async_fetch_track_trace
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,7 +48,8 @@ class AhDeliveryCoordinator(DataUpdateCoordinator[DeliveryData]):
         if delivery is None:
             return DEFAULT_UPDATE_INTERVAL
         now = dt_util.now()
-        if delivery.eta_is_fresh(now, int(ETA_MAX_AGE.total_seconds())):
+        max_age = int(ETA_MAX_AGE.total_seconds())
+        if delivery.eta_is_fresh(now, max_age) or delivery.track_is_fresh(now, max_age):
             return UPDATE_ACTIVE_ETA
         until_start = delivery.slot_start - now
         if until_start <= timedelta(hours=3):
@@ -78,13 +81,34 @@ class AhDeliveryCoordinator(DataUpdateCoordinator[DeliveryData]):
             raise UpdateFailed(str(err)) from err
 
         self._rate_limit_backoff = 0
+        diagnostics = deepcopy(self.client.diagnostic_snapshot)
+        diagnostics.setdefault("probes", {})
+
+        next_before_track = select_next_delivery(deliveries, fetched_at)
+        if next_before_track and next_before_track.order_id is not None:
+            track, track_diagnostics = await async_fetch_track_trace(
+                self.client,
+                next_before_track.order_id,
+                self.hass.config.time_zone,
+                fetched_at,
+                next_before_track.slot_start.date().isoformat(),
+            )
+            diagnostics["probes"]["track_and_trace_v2"] = track_diagnostics
+            deliveries = apply_track_trace(deliveries, track)
+        else:
+            diagnostics["probes"]["track_and_trace_v2"] = {
+                "ok": False,
+                "skipped": True,
+                "error": "no relevant open DELIVERY order",
+            }
+
         next_delivery = select_next_delivery(deliveries, fetched_at)
         data = DeliveryData(
             deliveries=deliveries,
             next_delivery=next_delivery,
             fetched_at=fetched_at,
             rich_eta_supported=self.client.rich_query_supported,
-            diagnostics=self.client.diagnostic_snapshot,
+            diagnostics=diagnostics,
         )
         self.update_interval = self._choose_interval(data)
         return data
