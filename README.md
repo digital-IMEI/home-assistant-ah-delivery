@@ -1,6 +1,6 @@
 # Albert Heijn Delivery for Home Assistant
 
-Unofficial Home Assistant custom integration that exposes the next Albert Heijn delivery window and, when available, a live ETA.
+Unofficial Home Assistant custom integration that exposes the next Albert Heijn home delivery, Track & Trace information and live arrival windows when Albert Heijn makes them available.
 
 > [!WARNING]
 > This integration uses Albert Heijn's private mobile API. It is not affiliated with or supported by Albert Heijn, and API changes may break it.
@@ -16,17 +16,38 @@ Unofficial Home Assistant custom integration that exposes the next Albert Heijn 
 
 Requires Home Assistant **2026.8.2 or newer**.
 
-## Sensors
+## Dashboard-oriented entities
 
-- Next delivery
-- Delivery window start
-- Delivery window end
-- Live ETA
-- Delivery status
+- **Next delivery** — best available timestamp, with planned window and Track & Trace attributes.
+- **Track & Trace message** — the human-readable live message from Albert Heijn. This entity is intentionally retained as a stable dashboard input.
+- **Track & Trace status** — e.g. `UNDERWAY` or `UNDERWAY_EARLY` when supplied by Albert Heijn.
+- **Delivery today** — binary sensor that is `on` when the currently selected next delivery is scheduled for today, otherwise `off`.
 
-Diagnostic sensors may be disabled by default. ETA support depends on the fields currently returned by the Albert Heijn API; the integration falls back to the booked delivery window when live ETA data is unavailable.
+Additional diagnostic entities expose delivery windows, ETA bounds, status and API diagnostics.
+
+## Adaptive polling
+
+Version 1.0.0 reduces unnecessary API traffic when a delivery is still far away:
+
+- more than 7 days away: every 6 hours
+- 2–7 days away: every 3 hours
+- 24–48 hours away: every hour
+- within 24 hours: every 15 minutes
+- within 3 hours or with active live ETA / Track & Trace: every 3 minutes
+- no open delivery: every 3 hours
+
+The separate Track & Trace request is only made on the actual delivery day.
 
 ## Release notes
+
+### 1.0.0
+
+- First stable release.
+- Keeps `sensor.ah_track_trace_message` as an essential dashboard data source.
+- Adds a **Delivery today** binary sensor for Lovelace visibility conditions and automations.
+- Adds adaptive polling to greatly reduce API traffic for deliveries that are still days away.
+- Only probes Track & Trace on the delivery day.
+- Recognises `UNDERWAY*` Track & Trace states as active live delivery data.
 
 ### 0.1.4
 
