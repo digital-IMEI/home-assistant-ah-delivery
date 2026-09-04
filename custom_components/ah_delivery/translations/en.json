@@ -29,7 +29,7 @@
       "live_eta": {"name": "Live ETA"},
       "eta_lower": {"name": "ETA lower bound"},
       "eta_upper": {"name": "ETA upper bound"},
-      "eta_window": {"name": "Expected arrival window"},
+      "eta_window": {"name": "Fulfillment ETA window"},
       "eta_status": {"name": "ETA status"},
       "delivery_status": {"name": "Delivery status"},
       "delivery_message": {"name": "Delivery message"},
@@ -41,6 +41,18 @@
       "slot_display": {"name": "Delivery window text"},
       "date_display": {"name": "Delivery date text"},
       "status_code": {"name": "Order status code"},
+      "track_trace_type": {"name": "Track & Trace status"},
+      "track_order_type": {"name": "Track & Trace order type"},
+      "track_message": {"name": "Track & Trace message"},
+      "track_eta_start": {"name": "Track ETA start"},
+      "track_eta_end": {"name": "Track ETA end"},
+      "track_eta_window": {"name": "Track ETA window"},
+      "realised_delivery_time": {"name": "Realised delivery time"},
+      "track_observed_at": {"name": "Track & Trace fetched at"},
+      "expected_arrival_window": {"name": "Best expected arrival window"},
+      "expected_source": {"name": "Expected arrival source"},
+      "last_update": {"name": "Last API update"},
+      "update_interval": {"name": "Update interval seconds"},
       "api_diagnostics": {"name": "API diagnostics"}
     }
   }
