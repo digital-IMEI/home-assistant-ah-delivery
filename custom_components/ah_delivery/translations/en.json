@@ -5,19 +5,13 @@
       "user": {
         "title": "Connect Albert Heijn",
         "description": "Open this Albert Heijn login URL in your browser: {login_url}\n\nLog in with Albert Heijn. When the browser redirects to appie://login-exit, copy the authorization code or the complete redirect URL and paste it below. Your AH password is never stored in Home Assistant.",
-        "data": {
-          "authorization_code": "Authorization code or redirect URL"
-        },
-        "data_description": {
-          "authorization_code": "Paste the value from the code parameter, or paste the complete appie://login-exit?... URL."
-        }
+        "data": {"authorization_code": "Authorization code or redirect URL"},
+        "data_description": {"authorization_code": "Paste the value from the code parameter, or paste the complete appie://login-exit?... URL."}
       },
       "reauth_confirm": {
         "title": "Reconnect Albert Heijn",
         "description": "Albert Heijn authentication has expired. Open {login_url}, log in again, then paste the new authorization code or complete redirect URL.",
-        "data": {
-          "authorization_code": "Authorization code or redirect URL"
-        }
+        "data": {"authorization_code": "Authorization code or redirect URL"}
       }
     },
     "error": {
@@ -25,27 +19,29 @@
       "cannot_connect": "Could not connect to the Albert Heijn API. Check your connection and try again.",
       "wrong_account": "You signed in with a different Albert Heijn account. Sign in with the account that was originally linked."
     },
-    "abort": {
-      "already_configured": "This Albert Heijn account is already configured."
-    }
+    "abort": {"already_configured": "This Albert Heijn account is already configured."}
   },
   "entity": {
     "sensor": {
-      "next_delivery": {
-        "name": "Volgende bezorging"
-      },
-      "slot_start": {
-        "name": "Delivery window start"
-      },
-      "slot_end": {
-        "name": "Delivery window end"
-      },
-      "live_eta": {
-        "name": "Live ETA"
-      },
-      "delivery_status": {
-        "name": "Delivery status"
-      }
+      "next_delivery": {"name": "Next delivery"},
+      "slot_start": {"name": "Delivery window start"},
+      "slot_end": {"name": "Delivery window end"},
+      "live_eta": {"name": "Live ETA"},
+      "eta_lower": {"name": "ETA lower bound"},
+      "eta_upper": {"name": "ETA upper bound"},
+      "eta_window": {"name": "Expected arrival window"},
+      "eta_status": {"name": "ETA status"},
+      "delivery_status": {"name": "Delivery status"},
+      "delivery_message": {"name": "Delivery message"},
+      "delivery_method": {"name": "Delivery method"},
+      "ride_number": {"name": "Ride number"},
+      "ride_sequence": {"name": "Ride sequence"},
+      "shift_code": {"name": "Shift code"},
+      "home_shop_center": {"name": "Home Shop Center"},
+      "slot_display": {"name": "Delivery window text"},
+      "date_display": {"name": "Delivery date text"},
+      "status_code": {"name": "Order status code"},
+      "api_diagnostics": {"name": "API diagnostics"}
     }
   }
 }
