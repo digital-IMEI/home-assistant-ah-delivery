@@ -29,7 +29,7 @@
       "live_eta": {"name": "Live verwachte aankomst"},
       "eta_lower": {"name": "ETA ondergrens"},
       "eta_upper": {"name": "ETA bovengrens"},
-      "eta_window": {"name": "Verwacht aankomstvenster"},
+      "eta_window": {"name": "Fulfillment ETA-venster"},
       "eta_status": {"name": "ETA-status"},
       "delivery_status": {"name": "Bezorgstatus"},
       "delivery_message": {"name": "Bezorgbericht"},
@@ -41,6 +41,18 @@
       "slot_display": {"name": "Bezorgvenster tekst"},
       "date_display": {"name": "Bezorgdatum tekst"},
       "status_code": {"name": "Orderstatuscode"},
+      "track_trace_type": {"name": "Track & Trace-status"},
+      "track_order_type": {"name": "Track & Trace-ordertype"},
+      "track_message": {"name": "Track & Trace-bericht"},
+      "track_eta_start": {"name": "Track ETA start"},
+      "track_eta_end": {"name": "Track ETA einde"},
+      "track_eta_window": {"name": "Track ETA-venster"},
+      "realised_delivery_time": {"name": "Gerealiseerde bezorgtijd"},
+      "track_observed_at": {"name": "Track & Trace opgehaald om"},
+      "expected_arrival_window": {"name": "Beste verwachte aankomstvenster"},
+      "expected_source": {"name": "Bron verwachte aankomst"},
+      "last_update": {"name": "Laatste API-update"},
+      "update_interval": {"name": "Update-interval seconden"},
       "api_diagnostics": {"name": "API-diagnostiek"}
     }
   }
