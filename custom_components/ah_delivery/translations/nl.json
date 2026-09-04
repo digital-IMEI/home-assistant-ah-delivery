@@ -54,6 +54,9 @@
       "last_update": {"name": "Laatste API-update"},
       "update_interval": {"name": "Update-interval seconden"},
       "api_diagnostics": {"name": "API-diagnostiek"}
+    },
+    "binary_sensor": {
+      "delivery_today": {"name": "Bezorging vandaag"}
     }
   }
 }
