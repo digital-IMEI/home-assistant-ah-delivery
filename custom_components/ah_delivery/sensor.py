@@ -15,7 +15,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from . import AhDeliveryConfigEntry, AhDeliveryRuntimeData
+from . import AhDeliveryConfigEntry
 from .const import CONF_MEMBER_ID, DOMAIN, ETA_MAX_AGE
 from .coordinator import AhDeliveryCoordinator
 from .models import Delivery
@@ -51,6 +51,7 @@ async def async_setup_entry(
 
     entities: list[SensorEntity] = [
         AhNextDeliverySensor(coordinator, entry),
+        AhTrackMessageSensor(coordinator, entry),
         AhEtaWindowSensor(coordinator, entry),
         AhTrackEtaWindowSensor(coordinator, entry),
         AhExpectedArrivalWindowSensor(coordinator, entry),
@@ -103,7 +104,6 @@ async def async_setup_entry(
         ("status_code", "status_code", lambda d: d.status_code, None),
         ("track_trace_type", "track_trace_type", lambda d: _safe_text(d.track_type), None),
         ("track_order_type", "track_order_type", lambda d: _safe_text(d.track_order_type), None),
-        ("track_message", "track_message", lambda d: _safe_text(d.track_message), None),
         (
             "track_eta_start",
             "track_eta_start",
@@ -196,6 +196,26 @@ class AhDiagnosticFieldSensor(_DiagnosticSensor):
         if self.delivery is None:
             return None
         return self._value_getter(self.delivery)
+
+
+class AhTrackMessageSensor(AhDeliveryBaseEntity, SensorEntity):
+    """Human-readable Track & Trace message for dashboards and automations."""
+
+    _attr_translation_key = "track_message"
+    _attr_entity_registry_enabled_default = True
+    _attr_suggested_object_id = "ah_track_trace_message"
+    _attr_icon = "mdi:truck-fast"
+
+    def __init__(self, coordinator: AhDeliveryCoordinator, entry: AhDeliveryConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        # Preserve the unique id used by pre-1.0 diagnostic sensor instances.
+        self._attr_unique_id = f"{self._account_key}_track_message"
+
+    @property
+    def native_value(self) -> str | None:
+        if self.delivery is None:
+            return None
+        return _safe_text(self.delivery.track_message)
 
 
 class AhNextDeliverySensor(AhDeliveryBaseEntity, SensorEntity):
